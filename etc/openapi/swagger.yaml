@@ -1,0 +1,485 @@
+openapi: 3.0.3
+info:
+  title: Lattice Space API
+  version: 1.0.0
+  description: API for end-to-end encrypted file sharing
+servers:
+  - url: https://lattice.fondasi.dev/api
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    ServerError:
+      description: Error from server.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              event:
+                type: string
+                enum: [ server_failed ]
+              kind:
+                type: string
+                enum: [ error ]
+              content:
+                type: string
+                description: The message explaining the error.
+              time:
+                type: integer
+                format: unix_millis
+
+    Unauthorized:
+      description: Authentication needed.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              event:
+                type: string
+                enum: [ unauthorized ]
+              kind:
+                type: string
+                enum: [ error ]
+              content:
+                type: string
+                description: The message explaining the error.
+              time:
+                type: integer
+                format: unix_millis
+
+    NotFound:
+      description: Resource(s) not found.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              event:
+                type: string
+                enum: [ not_found ]
+              kind:
+                type: string
+                enum: [ error ]
+              content:
+                type: string
+                description: The message explaining the error.
+              time:
+                type: integer
+                format: unix_millis
+
+    Forbidden:
+      description: Permission denied.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              event:
+                type: string
+                enum: [ forbidden ]
+              kind:
+                type: string
+                enum: [ error ]
+              content:
+                type: string
+                description: The message explaining the error.
+              time:
+                type: integer
+                format: unix_millis
+
+    Timeout:
+      description: Request canceled by sever due to timeout.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              event:
+                type: string
+                enum: [ deadline_exceeded ]
+              kind:
+                type: string
+                enum: [ error ]
+              content:
+                type: string
+                description: The message explaining the error.
+              time:
+                type: integer
+                format: unix_millis
+
+    TooManyRequest:
+      description: Too many request attempt.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              event:
+                type: string
+                enum: [ rate_limit_exceeded ]
+              kind:
+                type: string
+                enum: [ error ]
+              content:
+                type: string
+                description: The message explaining the error.
+              time:
+                type: integer
+                format: unix_millis
+
+    BadRequest:
+      description: Request Invalid
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              event:
+                type: string
+                enum: [ argument_invalid ]
+              kind:
+                type: string
+                enum: [ error ]
+              content:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                      description: The field name or path variable name.
+                    msg:
+                      type: string
+                      description: The message explaining the error.
+              time:
+                type: integer
+                format: unix_millis
+
+paths:
+  /v1/auth/challenge:
+    post:
+      summary: Ask for authentication code challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                aud:
+                  type: string
+                  enum: [isomorph, lattice]
+                  example: isomorph
+                  description: Audience
+                pub:
+                  type: string
+                  format: base64
+                  description: User's Public Key in PEM encoded bytes
+                alg:
+                  type: string
+                  enum: [Ed25519, RSA256, ES256]
+                  example: Ed25519
+                sub:
+                  type: string
+                  description: Username, optional for login, required for register.
+                int:
+                  type: string
+                  enum: [ login, register ]
+                  description: Intent for requesting the code challenge.
+      responses:
+        '200':
+          description: Challenge issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event:
+                    type: string
+                    enum: [ succeed ]
+                  kind:
+                    type: string
+                    enum: [ data ]
+                  content:
+                    type: object
+                    properties:
+                      challenge:
+                        type: string
+                      challenge_token:
+                        type: string
+                      iat:
+                        type: integer
+                      exp:
+                        type: integer
+                  time:
+                    type: integer
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '408':
+          $ref: "#/components/responses/Timeout"
+        '429':
+          $ref: "#/components/responses/TooManyRequest"
+        '500':
+          $ref: "#/components/responses/ServerError"
+  /v1/auth/token:
+    post:
+      summary: Exchange signed challenge for JWT access and refresh token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                signed_challenge_token:
+                  type: string
+                  description: Base64url encoded object containing challenge and signature
+      responses:
+        '200':
+          description: JWT tokens issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event:
+                    type: string
+                    enum: [granted]
+                  kind:
+                    type: string
+                    enum: [data]
+                  content:
+                    type: object
+                    properties:
+                      access_token:
+                        type: string
+                      refresh_token:
+                        type: string
+                      exp:
+                        type: integer
+                  time:
+                    type: integer
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '408':
+          $ref: "#/components/responses/Timeout"
+        '429':
+          $ref: "#/components/responses/TooManyRequest"
+        '500':
+          $ref: "#/components/responses/ServerError"
+  /v1/auth/refresh:
+    post:
+      summary: Renew access token using refresh token.
+      security:
+        - BearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: Access token refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event: { type: string, enum: [ granted ] }
+                  kind: { type: string, enum: [ data ] }
+                  content:
+                    type: object
+                    properties:
+                      access_token: { type: string }
+                      exp: { type: integer }
+                  time: { type: integer }
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '408':
+          $ref: "#/components/responses/Timeout"
+        '429':
+          $ref: "#/components/responses/TooManyRequest"
+        '500':
+          $ref: "#/components/responses/ServerError"
+
+  /v1/files:
+    get:
+      summary: List all files for current user.
+      security:
+        - BearerAuth: [ ]
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+          description: Page number for pagination
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 20 }
+          description: Number of files per page
+      responses:
+        '200':
+          description: List of all files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event: { type: string, enum: [ succeed ] }
+                  kind: { type: string, enum: [ data ] }
+                  content:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        oid: { type: string }
+                        filename: { type: string }
+                        size: { type: integer }
+                        created_at: { type: integer }
+                  time: { type: integer }
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '408':
+          $ref: "#/components/responses/Timeout"
+        '429':
+          $ref: "#/components/responses/TooManyRequest"
+        '500':
+          $ref: "#/components/responses/ServerError"
+
+  /v1/files/{oid}:
+      get:
+        summary: Get info of a specific file
+        security:
+          - BearerAuth: [ ]
+        parameters:
+          - name: oid
+            in: path
+            required: true
+            schema: { type: string }
+        responses:
+          '200':
+            description: File info retrieved successfully
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    event: { type: string, enum: [ succeed ] }
+                    kind: { type: string, enum: [ data ] }
+                    content:
+                      type: object
+                      properties:
+                        oid: { type: string }
+                        filename: { type: string }
+                        size: { type: integer }
+                        created_at: { type: integer }
+                    time: { type: integer }
+          '400':
+            $ref: "#/components/responses/BadRequest"
+          '401':
+            $ref: "#/components/responses/Unauthorized"
+          '404':
+            $ref: "#/components/responses/BadRequest"
+          '408':
+            $ref: "#/components/responses/Timeout"
+          '429':
+            $ref: "#/components/responses/TooManyRequest"
+          '500':
+            $ref: "#/components/responses/ServerError"
+
+  /v1/files/send:
+      post:
+        summary: Upload file with metadata
+        security:
+          - BearerAuth: [ ]
+        requestBody:
+          required: true
+          content:
+            multipart/form-data:
+              schema:
+                type: object
+                properties:
+                  file:
+                    type: string
+                    format: binary
+                  metadata:
+                    type: string
+                    format: binary
+        responses:
+          '200':
+            description: File uploaded successfully
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    event: { type: string, enum: [ created ] }
+                    kind: { type: string, enum: [ data ] }
+                    content:
+                      type: object
+                      properties:
+                        oid: { type: string }
+                        filename: { type: string }
+                        size: { type: integer }
+                        created_at: { type: integer }
+                    time: { type: integer }
+          '400':
+            $ref: "#/components/responses/BadRequest"
+          '401':
+            $ref: "#/components/responses/Unauthorized"
+          '408':
+            $ref: "#/components/responses/Timeout"
+          '429':
+            $ref: "#/components/responses/TooManyRequest"
+          '500':
+            $ref: "#/components/responses/ServerError"
+
+  /v1/files/{oid}/download:
+      get:
+        summary: Download encrypted file
+        security:
+          - BearerAuth: [ ]
+        parameters:
+          - name: oid
+            in: path
+            required: true
+            schema: { type: string }
+        responses:
+          '200':
+            description: File download started
+            content:
+              application/octet-stream:
+                schema:
+                  type: string
+                  format: binary
+          '400':
+            $ref: "#/components/responses/BadRequest"
+          '401':
+            $ref: "#/components/responses/Unauthorized"
+          '404':
+            $ref: "#/components/responses/Unauthorized"
+          '408':
+            $ref: "#/components/responses/Timeout"
+          '429':
+            $ref: "#/components/responses/TooManyRequest"
+          '500':
+            $ref: "#/components/responses/ServerError"
+
+
+
+
+
