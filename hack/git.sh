@@ -1,0 +1,1 @@
+alias 'gll=git log --oneline'
